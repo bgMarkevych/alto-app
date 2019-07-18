@@ -11,7 +11,13 @@ class SplashEvent extends BasicEvent {}
 
 class MainEvent extends BasicEvent {}
 
-class EcoSystemSelectedEvent extends BasicEvent {}
+class EcoSystemSelectedEvent extends BasicEvent {
+  String data;
+  EcoSystem type;
+
+  EcoSystemSelectedEvent(this.data, this.type);
+
+}
 
 class FilesEvent extends BasicEvent {
   EcoSystem type;
@@ -64,3 +70,5 @@ class DownloadEvent extends BasicEvent {
 
   DownloadEvent(this.url, this.fileName, this.downloadListener);
 }
+
+class LoginEvent extends BasicEvent{}

@@ -9,12 +9,16 @@ abstract class FillerFile {
 }
 
 class StorageFile extends FillerFile {
-  StorageFile(isFolder, path, name, date, extension) : super(isFolder, path, name, date, extension);
+  StorageFile(isFolder, path, name, date, extension)
+      : super(isFolder, path, name, date, extension);
 }
 
-enum EcoSystem {
-  STORAGE, GOOGLE, DROPBOX, ONEDRIVE
+class DropboxFile extends FillerFile {
+  DropboxFile(isFolder, path, name, date, extension)
+      : super(isFolder, path, name, date, extension);
 }
+
+enum EcoSystem { STORAGE, GOOGLE, DROPBOX, ONEDRIVE }
 
 class Progress {
 //  UPLOAD, PENDING, START, FINISH

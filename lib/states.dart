@@ -56,3 +56,5 @@ class ExportState extends BasicState {
 
   ExportState(this.fileName, this.url, this.oldPath);
 }
+
+class LoginState extends BasicState{}

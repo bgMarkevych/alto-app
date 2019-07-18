@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:rxdart/rxdart.dart';
-
+import 'package:webview_flutter/webview_flutter.dart';
 import 'appBloc.dart';
 import 'data.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +13,8 @@ import 'repository.dart';
 import 'states.dart';
 import 'package:native_pdf_renderer/native_pdf_renderer.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
+import 'constants.dart';
+import 'preferences.dart';
 
 class SplashScreen extends StatelessWidget {
   @override
@@ -104,8 +106,10 @@ class MainScreen extends StatelessWidget {
                         ),
                         MainGridItem("assets/images/google_drive.png",
                             "Google Drive", () {}),
-                        MainGridItem(
-                            "assets/images/dropbox.png", "Dropbox", () {}),
+                        MainGridItem("assets/images/dropbox.png", "Dropbox",
+                            () {
+                          bloc.dispatch(FilesEvent(EcoSystem.DROPBOX));
+                        }),
                         MainGridItem(
                             "assets/images/onedrive.png", "OneDrive", () {}),
                       ],
@@ -298,8 +302,9 @@ class FilesScreen extends StatelessWidget {
     print("files screen");
     return BlocProvider<FilesBloc>(
       builder: (context) => FilesBloc(
-            getFilePickerByType(context, type),
-          )..dispatch(EcoSystemSelectedEvent()),
+        getFilePickerByType(context, type),
+        context,
+      )..dispatch(EcoSystemSelectedEvent("", type)),
       child: Scaffold(
         body: FilesListContainer(type),
       ),
@@ -310,6 +315,13 @@ class FilesScreen extends StatelessWidget {
     if (type == EcoSystem.STORAGE) {
       return FilePickerStorage(
         BlocProvider.of<GlobalBloc>(context),
+        type,
+      );
+    }
+    if (type == EcoSystem.DROPBOX) {
+      return FilePickerDropbox(
+        BlocProvider.of<GlobalBloc>(context),
+        type,
       );
     }
   }
@@ -325,6 +337,9 @@ class FilesListContainer extends StatelessWidget {
     return BlocBuilder<BasicEvent, BasicState>(
         bloc: BlocProvider.of<FilesBloc>(context),
         builder: (context, state) {
+          if (state is LoginState) {
+            return WebLoginView(type);
+          }
           if (state is LoadingState) {
             return LoadingView();
           }
@@ -356,6 +371,7 @@ class FilesListContainer extends StatelessWidget {
               BlocProvider.of<GlobalBloc>(context)..dispatch(MainEvent());
             });
           }
+          return null;
         });
   }
 }
@@ -1250,4 +1266,45 @@ void showLoadingDialog(context) {
           ],
         );
       });
+}
+
+class WebLoginView extends StatelessWidget {
+  WebViewController _controller;
+  EcoSystem type;
+
+  WebLoginView(this.type);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: Icon(
+          Icons.arrow_back_ios,
+          color: Colors.white,
+        ),
+        title: Text("Login"),
+        centerTitle: true,
+      ),
+      body: WebView(
+        initialUrl: DropboxConstants.LOGIN_URL,
+        javascriptMode: JavascriptMode.unrestricted,
+        onWebViewCreated: (c) {
+          _controller = c;
+        },
+        onPageFinished: (string) {
+          if (string.contains(DropboxConstants.REDIRECT_URL)) {
+            handleCodeResult(string, type, context);
+          }
+        },
+      ),
+    );
+  }
+
+  void handleCodeResult(String url, EcoSystem type, BuildContext context) {
+    var uri = Uri.parse(url);
+    var code = uri.queryParameters["code"];
+    print(code);
+    final bloc = BlocProvider.of<FilesBloc>(context);
+    bloc.dispatch(EcoSystemSelectedEvent(code, type));
+  }
 }

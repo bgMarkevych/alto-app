@@ -3,7 +3,9 @@ import 'package:http_parser/http_parser.dart';
 import 'package:meta/meta.dart';
 import 'package:native_pdf_renderer/native_pdf_renderer.dart';
 import 'package:path/path.dart';
-import 'package:simple_permissions/simple_permissions.dart';
+import 'constants.dart';
+
+//import 'package:simple_permissions/simple_permissions.dart';
 import 'package:path_provider/path_provider.dart';
 import 'appBloc.dart';
 import 'data.dart';
@@ -15,10 +17,18 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import 'package:rxdart/rxdart.dart';
 import 'events.dart';
+import 'package:permission_handler/permission_handler.dart' as permissions;
+import 'package:googleapis/oauth2/v2.dart';
+import 'package:googleapis_auth/auth.dart';
+import 'package:googleapis_auth/auth_io.dart';
+import 'preferences.dart';
 
 abstract class FilePicker {
-  FilePicker(this.bloc);
+  FilePicker(this.bloc, type) {
+    preferences = Preferences(type);
+  }
 
+  Preferences preferences;
   final GlobalBloc bloc;
   final Queue backStack = new Queue();
   bool isRoot = true;
@@ -28,6 +38,8 @@ abstract class FilePicker {
 
   @protected
   Future<List<FillerFile>> _fetchRoot();
+
+  Future<List<FillerFile>> checkLoginAndCatchRoot(String data);
 
   @protected
   Future<List<FillerFile>> _fetchFiles(String path);
@@ -87,38 +99,36 @@ abstract class FilePicker {
     _converter.uploadFile(fillerFile, progressListener);
   }
 
-  void downloadFile(String url, String fileName, Subject<String> downloadListener) async{
+  void downloadFile(
+      String url, String fileName, Subject<String> downloadListener) async {
     HttpClient client = HttpClient();
     var request = await client.getUrl(Uri.parse(url));
     var response = await request.close();
-    if(response.statusCode != 200){
+    if (response.statusCode != 200) {
       downloadListener.add("Ooops, Error occured while downloading");
       return;
     }
     String path;
-    if(Platform.isAndroid){
+    if (Platform.isAndroid) {
       Directory root = await getExternalStorageDirectory();
       path = root.path + "/" + "Download";
-    } else{
+    } else {
       Directory root = await getApplicationDocumentsDirectory();
       path = root.path;
     }
     File file = File(path + "/" + fileName);
     var _downloadData = List<int>();
-    response.listen((d) => _downloadData.addAll(d),
-        onDone: () {
-          file.writeAsBytes(_downloadData);
-          downloadListener.add("File is downloaded successfully");
-        }
-    );
+    response.listen((d) => _downloadData.addAll(d), onDone: () {
+      file.writeAsBytes(_downloadData);
+      downloadListener.add("File is downloaded successfully");
+    });
   }
 
-  void export(String packageName) async{
-  }
+  void export(String packageName) async {}
 }
 
 class FilePickerStorage extends FilePicker {
-  FilePickerStorage(GlobalBloc bloc) : super(bloc);
+  FilePickerStorage(GlobalBloc bloc, EcoSystem type) : super(bloc, type);
 
   @override
   Future<List<FillerFile>> _fetchFiles(String path) async {
@@ -130,28 +140,45 @@ class FilePickerStorage extends FilePicker {
 
   @override
   Future<List<FillerFile>> _fetchRoot() async {
-    Future<Directory> directoryFuture;
+    Directory directory;
     if (Platform.isAndroid) {
-      bool externalStoragePermissionOkay =
-          await SimplePermissions.checkPermission(
-              Permission.WriteExternalStorage);
-      if (!externalStoragePermissionOkay) {
-        final status = await SimplePermissions.requestPermission(
-            Permission.WriteExternalStorage);
-        externalStoragePermissionOkay = status == PermissionStatus.authorized;
+//      bool externalStoragePermissionOkay =
+//          await SimplePermissions.checkPermission(
+//              Permission.WriteExternalStorage);
+//      if (!externalStoragePermissionOkay) {
+//        final status = await SimplePermissions.requestPermission(
+//            Permission.WriteExternalStorage);
+//        externalStoragePermissionOkay = status == PermissionStatus.authorized;
+//      }
+//      print(externalStoragePermissionOkay);
+//      if (!externalStoragePermissionOkay) {
+//        bloc..dispatch(MainEvent());
+//        return null;
+//      }
+      permissions.PermissionHandler permissionHandler =
+          permissions.PermissionHandler();
+      bool isGranted = await permissionHandler
+              .checkPermissionStatus(permissions.PermissionGroup.storage) ==
+          permissions.PermissionStatus.granted;
+      if (!isGranted) {
+        permissionHandler.requestPermissions(
+            [permissions.PermissionGroup.storage]).then((map) {
+          var key = map.keys.firstWhere(
+              (group) => group == permissions.PermissionGroup.storage,
+              orElse: () => null);
+          isGranted = map[key] == permissions.PermissionStatus.granted;
+        });
       }
-      print(externalStoragePermissionOkay);
-      if (!externalStoragePermissionOkay) {
+      if (!isGranted) {
         bloc..dispatch(MainEvent());
         return null;
       }
-      directoryFuture = await getExternalStorageDirectory() == null
-          ? getApplicationDocumentsDirectory()
-          : getExternalStorageDirectory();
+      directory = await getExternalStorageDirectory() == null
+          ? await getApplicationDocumentsDirectory()
+          : Directory("/storage/emulated/0");
     } else {
-      directoryFuture = getApplicationDocumentsDirectory();
+      directory = await getApplicationDocumentsDirectory();
     }
-    Directory directory = await directoryFuture;
     parentPath = directory.path;
     List<FillerFile> files = _mapFiles(directory.listSync());
     print(directory.listSync().length);
@@ -174,6 +201,72 @@ class FilePickerStorage extends FilePicker {
       );
     });
     return files;
+  }
+
+  @override
+  Future<List<FillerFile>> checkLoginAndCatchRoot(String data) {
+    return routeToRoot();
+  }
+}
+
+class FilePickerDropbox extends FilePicker {
+  FilePickerDropbox(GlobalBloc bloc, EcoSystem type) : super(bloc, type);
+
+  @override
+  Future<List<FillerFile>> _fetchFiles(String path) {
+    return null;
+  }
+
+  @override
+  Future<List<FillerFile>> _fetchRoot() async {
+    return null;
+  }
+
+  @override
+  Future<List<FillerFile>> checkLoginAndCatchRoot(String data) async {
+    print("start flow");
+    var requestTemp = http.Request(
+        "POST", Uri.parse("https://api.dropboxapi.com/oauth2/token"));
+    var auth = utf8
+        .encode(DropboxConstants.APP_KEY + ":" + DropboxConstants.APP_SECRET);
+    var base64auth = base64.encode(auth);
+    requestTemp.headers
+        .putIfAbsent("Authorization", () => "Basic " + base64auth);
+    Map<String, String> body = Map();
+    requestTemp.headers
+        .putIfAbsent("content-type", () => "application/x-www-form-urlencoded");
+    body.putIfAbsent("code", () => data);
+    body.putIfAbsent("grant_type", () => "authorization_code");
+    body.putIfAbsent("redirect_uri", () => DropboxConstants.REDIRECT_URL);
+    requestTemp.bodyFields = body;
+    print(requestTemp.bodyFields);
+    var response = await requestTemp.send();
+    var json = await response.stream.bytesToString();
+    print(json);
+    var decodedJson = jsonDecode(json);
+    String token = decodedJson["access_token"];
+    print("end flow");
+    print(token);
+    var filesRequest = http.Request(
+        "POST", Uri.parse("https://api.dropboxapi.com/2/files/list_folder"));
+    filesRequest.headers.putIfAbsent("Authorization", () => "Bearer " + token);
+    filesRequest.headers.putIfAbsent("Content-Type", () => "application/json");
+    filesRequest.body = "{\"path\": \"\"}";
+    var filesResponse = await filesRequest.send();
+    var filesJson = await filesResponse.stream.bytesToString();
+    print(filesJson);
+    var decodedFilesJson = jsonDecode(filesJson);
+    Iterable list = decodedFilesJson["entries"];
+    final List<FillerFile> files = [];
+    list.forEach((decodedFile){
+      var path = decodedFile["path_display"];
+      var date = decodedFile["client_modified"];
+      var name = decodedFile["name"];
+      var fileExtension = extension(name);
+      var isFolder = decodedFile[".tag"] == "folder";
+      files.add(DropboxFile(isFolder, path, name, date, fileExtension));
+    });
+    return Future.value(files);
   }
 }
 
@@ -228,14 +321,14 @@ class Converter {
     connection.stream.listen(
       (message) {
         print(message);
-        if(message == "[]" || message == "{}"){
+        if (message == "[]" || message == "{}") {
           return;
         }
         var decodedMessage = jsonDecode(message);
         var properties = decodedMessage["properties"];
         var fileStatus = properties["status"];
         print(fileStatus);
-        if(fileStatus == null){
+        if (fileStatus == null) {
           return;
         }
         progressListener.add(_progressMap[fileStatus]);
@@ -249,5 +342,4 @@ class Converter {
       },
     );
   }
-
 }

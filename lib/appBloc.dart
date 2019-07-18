@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:bloc/bloc.dart';
+import 'package:flutter/material.dart';
 import 'package:native_pdf_renderer/native_pdf_renderer.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,6 +10,8 @@ import 'package:test_app/data.dart';
 import 'package:test_app/events.dart';
 import 'package:test_app/repository.dart';
 import 'package:test_app/states.dart';
+import 'widgets.dart';
+import 'preferences.dart';
 
 class GlobalBloc extends Bloc<BasicEvent, BasicState> {
   @override
@@ -32,8 +35,9 @@ class GlobalBloc extends Bloc<BasicEvent, BasicState> {
 
 class FilesBloc extends Bloc<BasicEvent, BasicState> {
   FilePicker filePicker;
+  BuildContext context;
 
-  FilesBloc(this.filePicker);
+  FilesBloc(this.filePicker, this.context);
 
   @override
   BasicState get initialState => EcoSystemSelectedState();
@@ -41,12 +45,21 @@ class FilesBloc extends Bloc<BasicEvent, BasicState> {
   @override
   Stream<BasicState> mapEventToState(BasicEvent event) async* {
     if (event is EcoSystemSelectedEvent) {
+      if ((event.data == null || event.data == "") && event.type != EcoSystem.STORAGE) {
+        yield LoginState();
+        return;
+      }
       yield EcoSystemSelectedState();
-      List<FillerFile> files = await filePicker.routeToRoot();
+      showLoadingDialog(context);
+      List<FillerFile> files =
+          await filePicker.checkLoginAndCatchRoot(event.data);
+      Navigator.pop(context);
       yield RootFolderState(files);
     }
     if (event is GoBackEvent) {
+      showLoadingDialog(context);
       List<FillerFile> files = await filePicker.onBackPress();
+      Navigator.pop(context);
       if (filePicker.isRoot) {
         yield RootFolderState(files);
       } else {
@@ -54,12 +67,15 @@ class FilesBloc extends Bloc<BasicEvent, BasicState> {
       }
     }
     if (event is SubFolderEvent) {
+      showLoadingDialog(context);
       List<FillerFile> files = await filePicker.routeToNextFolder(event.file);
+      Navigator.pop(context);
       yield SubFolderState(files, filePicker.currentItem.name);
     }
     if (event is RenderPDFEvent) {
-      yield LoadingState();
+      showLoadingDialog(context);
       List<PDFPageImage> pages = await filePicker.renderPdfDocument(event.path);
+      Navigator.pop(context);
       yield RenderPDFState(pages, event.path);
     }
     if (event is ConvertEvent) {
@@ -70,8 +86,9 @@ class FilesBloc extends Bloc<BasicEvent, BasicState> {
     if (event is ExportEvent) {
       yield ExportState(event.newName, event.url, event.oldFilePath);
     }
-    if(event is DownloadEvent){
-      filePicker.downloadFile(event.url, event.fileName, event.downloadListener);
+    if (event is DownloadEvent) {
+      filePicker.downloadFile(
+          event.url, event.fileName, event.downloadListener);
     }
     if (event is ErrorEvent) {
       yield ErrorState();
