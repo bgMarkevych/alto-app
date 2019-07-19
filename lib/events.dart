@@ -36,7 +36,8 @@ class SubFolderEvent extends BasicEvent {
   SubFolderEvent(this.file);
 }
 
-class GoBackEvent extends BasicEvent {}
+class GoBackEvent extends BasicEvent {
+}
 
 class LoadingEvent extends BasicEvent {}
 
@@ -76,3 +77,5 @@ class LoginEvent extends BasicEvent{
   LoginEvent(this.code);
 
 }
+
+class LogoutEvent extends BasicEvent{}

@@ -68,6 +68,10 @@ abstract class FilePicker {
     return _fetchRoot();
   }
 
+  Future<void> logout(){
+    return storage.logout();
+  }
+
   Future<List<FillerFile>> routeToNextFolder(FillerFile file) async {
     isRoot = false;
     currentItem = file;
@@ -76,7 +80,7 @@ abstract class FilePicker {
     return files;
   }
 
-  Future<List<PDFPageImage>> renderPdfDocument(String path) async {
+  Future<PagesContainer> renderPdfDocument(String path) async {
     print("start render");
     final document = await PDFDocument.openFile(path);
     print("file opened");
@@ -94,7 +98,7 @@ abstract class FilePicker {
       print("page added " + i.toString());
     }
     print("stop render");
-    return Future.value(pages);
+    return Future.value(PagesContainer(pages, path));
   }
 
   void convert(File fillerFile, Subject progressListener) {
@@ -130,6 +134,10 @@ abstract class FilePicker {
 
   Future<bool> hasToken() {
     return storage.hasToken();
+  }
+
+  Future<User> getUser(){
+    return storage.getUser();
   }
 
   Future<bool> _checkPermissions() async {
@@ -266,14 +274,28 @@ class FilePickerDropbox extends FilePicker {
     print(json);
     var decodedJson = jsonDecode(json);
     String token = decodedJson["access_token"];
+    String userId = decodedJson["account_id"];
     print("end flow");
     print(token);
     await storage.saveToken(token);
     print(await storage.hasToken());
+    var userInfoRequest = http.Request("POST", Uri.parse("https://api.dropboxapi.com/2/users/get_account"));
+    userInfoRequest.headers.putIfAbsent("Authorization", ()=> "Bearer " + token);
+    userInfoRequest.headers.putIfAbsent("content-type", () => "application/json");
+    userInfoRequest.body = "{\"account_id\": \"" + userId + "\"}";
+    var userInfoResponse = await userInfoRequest.send();
+    var userInfoJson = await userInfoResponse.stream.bytesToString();
+    print(userInfoJson);
+    var decodedUserInfoJson = jsonDecode(userInfoJson);
+    var email = decodedUserInfoJson["email"];
+    print(email);
+    var photoUrl = decodedUserInfoJson["profile_photo_url"];
+    print(photoUrl);
+    await storage.saveUser(email, photoUrl);
   }
 
   @override
-  Future<List<PDFPageImage>> renderPdfDocument(String path) async {
+  Future<PagesContainer> renderPdfDocument(String path) async {
     Directory directory;
     if (Platform.isAndroid) {
       bool isGranted = await _checkPermissions();

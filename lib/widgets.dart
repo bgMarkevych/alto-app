@@ -207,8 +207,13 @@ class MainGridItem extends StatelessWidget {
   }
 }
 
-AppBar buildAppBar(BuildContext context, bool needToShowUserIcon,
-    bool showConvertButton, String header, VoidCallback convertCallback) {
+AppBar buildAppBar(
+    BuildContext context,
+    bool needToShowUserIcon,
+    bool showConvertButton,
+    String header,
+    VoidCallback convertCallback,
+    VoidCallback userIconCallback) {
   final bloc = BlocProvider.of<FilesBloc>(context);
   return AppBar(
     actions: <Widget>[
@@ -220,7 +225,7 @@ AppBar buildAppBar(BuildContext context, bool needToShowUserIcon,
                     Icons.supervised_user_circle,
                     color: Colors.white,
                   ),
-                  onPressed: () {})
+                  onPressed: userIconCallback)
           : Center(
               child: MaterialButton(
                 color: themeData.primaryColor,
@@ -327,8 +332,10 @@ class FilesScreen extends StatelessWidget {
   }
 }
 
+// ignore: must_be_immutable
 class FilesListContainer extends StatelessWidget {
   final EcoSystem type;
+  User user;
 
   FilesListContainer(this.type);
 
@@ -345,15 +352,15 @@ class FilesListContainer extends StatelessWidget {
           }
           if (state is EcoSystemSelectedState) {
             return Scaffold(
-              appBar: buildAppBar(
-                  context, type != EcoSystem.STORAGE, false, null, null),
+              appBar: buildAppBar(context, false, false, null, null, null),
             );
           }
           if (state is RootFolderState) {
-            return FilesList(state.files, type, null);
+            user = state.user;
+            return FilesList(state.files, type, null, user);
           }
           if (state is SubFolderState) {
-            return FilesList(state.files, type, state.name);
+            return FilesList(state.files, type, state.name, user);
           }
           if (state is RenderPDFState) {
             return PdfViewer(state.pages, state.filePath);
@@ -382,11 +389,13 @@ class FilesList extends StatelessWidget {
   final EcoSystem type;
   final String folderName;
   bool isFilesEmpty;
+  final User user;
+  final GlobalKey<ScaffoldState> _scaffoldKey = new GlobalKey<ScaffoldState>();
 
-  FilesList(List<FillerFile> files, this.type, this.folderName) {
+  FilesList(List<FillerFile> files, this.type, this.folderName, this.user) {
     isFilesEmpty = files == null || files.isEmpty;
-    files.sort((a,b){
-      return a.isFolder == b.isFolder ? 0: 1;
+    files.sort((a, b) {
+      return a.isFolder == b.isFolder ? 0 : 1;
     });
     this.files = files;
   }
@@ -396,9 +405,134 @@ class FilesList extends StatelessWidget {
     final bloc = BlocProvider.of<FilesBloc>(context);
     return WillPopScope(
         child: Scaffold(
+            key: _scaffoldKey,
+            endDrawer: Drawer(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Color(0xFF313131),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    top: 35,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.max,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: <Widget>[
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: 35,
+                        ),
+                        child: CircleAvatar(
+                          child: user.photoUrl != "empty"
+                              ? Image.network(
+                                  user.photoUrl,
+                                  width: 64,
+                                  height: 64,
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.grey[400],
+                                  ),
+                                  width: 64,
+                                  height: 64,
+                                  child: Center(
+                                    child: Text(
+                                      user.email.substring(
+                                        0,
+                                        1,
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: 12,
+                        ),
+                        child: Text(
+                          user.email,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: 8,
+                        ),
+                        child: Text(
+                          getTitleByEcoSystem(type),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: Color(0xFFa0a0a0),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: 35,
+                        ),
+                        child: Divider(
+                          height: 1,
+                          color: Colors.black,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 18,
+                        ),
+                        child: InkWell(
+                          onTap: () {
+                            final bloc = BlocProvider.of<FilesBloc>(context);
+                            bloc.dispatch(LogoutEvent());
+                          },
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                Icons.exit_to_app,
+                                color: Colors.white,
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                ),
+                                child: Text(
+                                  "Logout",
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                              )
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             appBar: !isFilesEmpty
                 ? buildAppBar(
-                    context, type != EcoSystem.STORAGE, false, folderName, null)
+                    context, type != EcoSystem.STORAGE, false, folderName, null,
+                    () {
+                    _scaffoldKey.currentState.openEndDrawer();
+                  })
                 : null,
             body: !isFilesEmpty
                 ? buildFilesList(files, type)
@@ -416,12 +550,7 @@ class FilesList extends StatelessWidget {
   }
 }
 
-ListView buildFilesList(List<FillerFile> files, type) {
-  List<Object> list = [];
-  files.sort((a, b) {
-    // ignore: unnecessary_statements
-    return !FileSystemEntity.isDirectorySync(a.path) ? 1 : 0;
-  });
+String getTitleByEcoSystem(EcoSystem type) {
   String title = "";
   if (type == EcoSystem.STORAGE) {
     title = "Storage";
@@ -432,6 +561,16 @@ ListView buildFilesList(List<FillerFile> files, type) {
   } else if (type == EcoSystem.DROPBOX) {
     title = "Dropbox";
   }
+  return title;
+}
+
+ListView buildFilesList(List<FillerFile> files, type) {
+  List<Object> list = [];
+  files.sort((a, b) {
+    // ignore: unnecessary_statements
+    return !FileSystemEntity.isDirectorySync(a.path) ? 1 : 0;
+  });
+  var title = getTitleByEcoSystem(type);
   list.add(title);
   list.addAll(files);
   return ListView.builder(
@@ -484,7 +623,7 @@ class FileListItem extends StatelessWidget {
     print(file.name);
     return InkWell(
       onTap: () {
-        if(file.extension != ".pdf"){
+        if (file.extension != ".pdf") {
           return;
         }
         bloc.dispatch(RenderPDFEvent(file.path));
@@ -769,6 +908,7 @@ class PdfViewerState extends State<PdfViewer> {
         () {
           bloc.dispatch(ConvertEvent(widget.filePath));
         },
+        null,
       ),
       body: Column(
         children: <Widget>[
@@ -1282,8 +1422,8 @@ class WebLoginView extends StatelessWidget {
   String loginUrl;
   String redirectUrl;
 
-  WebLoginView(this.type){
-    if(type == EcoSystem.DROPBOX){
+  WebLoginView(this.type) {
+    if (type == EcoSystem.DROPBOX) {
       loginUrl = DropboxConstants.LOGIN_URL;
       redirectUrl = DropboxConstants.REDIRECT_URL;
     }
@@ -1294,7 +1434,7 @@ class WebLoginView extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         leading: InkWell(
-          onTap: (){
+          onTap: () {
             final bloc = BlocProvider.of<GlobalBloc>(context);
             bloc.dispatch(MainEvent());
           },

@@ -20,8 +20,9 @@ class FilesState extends BasicState {
 
 class RootFolderState extends BasicState {
   List<FillerFile> files;
+  User user;
 
-  RootFolderState(this.files);
+  RootFolderState(this.files, this.user);
 }
 
 class SubFolderState extends BasicState {

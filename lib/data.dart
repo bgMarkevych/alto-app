@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:native_pdf_renderer/native_pdf_renderer.dart';
+
 abstract class FillerFile {
   bool isFolder;
   String path;
@@ -27,4 +31,20 @@ class Progress {
   static final String PENDING = "PENDING";
   static final String START = "START";
   static final String FINISH = "FINISH";
+}
+
+class PagesContainer{
+  final List<PDFPageImage> pages;
+  final String filePath;
+
+  PagesContainer(this.pages, this.filePath);
+
+}
+
+class User{
+  final String email;
+  final String photoUrl;
+
+  User(this.email, this.photoUrl);
+
 }
