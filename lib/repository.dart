@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:http_parser/http_parser.dart';
 import 'package:meta/meta.dart';
@@ -9,6 +10,7 @@ import 'constants.dart';
 import 'package:path_provider/path_provider.dart';
 import 'appBloc.dart';
 import 'data.dart';
+import 'package:utf/utf.dart';
 import 'dart:collection';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -21,14 +23,14 @@ import 'package:permission_handler/permission_handler.dart' as permissions;
 import 'package:googleapis/oauth2/v2.dart';
 import 'package:googleapis_auth/auth.dart';
 import 'package:googleapis_auth/auth_io.dart';
-import 'preferences.dart';
+import 'storage.dart';
 
 abstract class FilePicker {
   FilePicker(this.bloc, type) {
-    preferences = Preferences(type);
+    storage = Storage(type);
   }
 
-  Preferences preferences;
+  Storage storage;
   final GlobalBloc bloc;
   final Queue backStack = new Queue();
   bool isRoot = true;
@@ -39,7 +41,7 @@ abstract class FilePicker {
   @protected
   Future<List<FillerFile>> _fetchRoot();
 
-  Future<List<FillerFile>> checkLoginAndCatchRoot(String data);
+  Future<void> getToken(String data);
 
   @protected
   Future<List<FillerFile>> _fetchFiles(String path);
@@ -81,7 +83,7 @@ abstract class FilePicker {
     final pagesCount = document.pagesCount;
     print("pages " + pagesCount.toString());
     final List<PDFPageImage> pages = [];
-    for (var i = 1; i < pagesCount; i++) {
+    for (var i = 1; i <= pagesCount; i++) {
       print("loop start");
       PDFPage page = await document.getPage(i);
       print("get page " + i.toString());
@@ -110,8 +112,8 @@ abstract class FilePicker {
     }
     String path;
     if (Platform.isAndroid) {
-      Directory root = await getExternalStorageDirectory();
-      path = root.path + "/" + "Download";
+      Directory root = Directory("/storage/emulated/0");
+      path = root.path + "/Download";
     } else {
       Directory root = await getApplicationDocumentsDirectory();
       path = root.path;
@@ -125,6 +127,28 @@ abstract class FilePicker {
   }
 
   void export(String packageName) async {}
+
+  Future<bool> hasToken() {
+    return storage.hasToken();
+  }
+
+  Future<bool> _checkPermissions() async {
+    permissions.PermissionHandler permissionHandler =
+        permissions.PermissionHandler();
+    bool isGranted = await permissionHandler
+            .checkPermissionStatus(permissions.PermissionGroup.storage) ==
+        permissions.PermissionStatus.granted;
+    if (!isGranted) {
+      await permissionHandler.requestPermissions(
+          [permissions.PermissionGroup.storage]).then((map) {
+        var key = map.keys.firstWhere(
+            (group) => group == permissions.PermissionGroup.storage,
+            orElse: () => null);
+        isGranted = map[key] == permissions.PermissionStatus.granted;
+      });
+    }
+    return Future.value(isGranted);
+  }
 }
 
 class FilePickerStorage extends FilePicker {
@@ -142,33 +166,7 @@ class FilePickerStorage extends FilePicker {
   Future<List<FillerFile>> _fetchRoot() async {
     Directory directory;
     if (Platform.isAndroid) {
-//      bool externalStoragePermissionOkay =
-//          await SimplePermissions.checkPermission(
-//              Permission.WriteExternalStorage);
-//      if (!externalStoragePermissionOkay) {
-//        final status = await SimplePermissions.requestPermission(
-//            Permission.WriteExternalStorage);
-//        externalStoragePermissionOkay = status == PermissionStatus.authorized;
-//      }
-//      print(externalStoragePermissionOkay);
-//      if (!externalStoragePermissionOkay) {
-//        bloc..dispatch(MainEvent());
-//        return null;
-//      }
-      permissions.PermissionHandler permissionHandler =
-          permissions.PermissionHandler();
-      bool isGranted = await permissionHandler
-              .checkPermissionStatus(permissions.PermissionGroup.storage) ==
-          permissions.PermissionStatus.granted;
-      if (!isGranted) {
-        permissionHandler.requestPermissions(
-            [permissions.PermissionGroup.storage]).then((map) {
-          var key = map.keys.firstWhere(
-              (group) => group == permissions.PermissionGroup.storage,
-              orElse: () => null);
-          isGranted = map[key] == permissions.PermissionStatus.granted;
-        });
-      }
+      bool isGranted = await _checkPermissions();
       if (!isGranted) {
         bloc..dispatch(MainEvent());
         return null;
@@ -204,9 +202,7 @@ class FilePickerStorage extends FilePicker {
   }
 
   @override
-  Future<List<FillerFile>> checkLoginAndCatchRoot(String data) {
-    return routeToRoot();
-  }
+  Future<void> getToken(String data) {}
 }
 
 class FilePickerDropbox extends FilePicker {
@@ -214,16 +210,41 @@ class FilePickerDropbox extends FilePicker {
 
   @override
   Future<List<FillerFile>> _fetchFiles(String path) {
-    return null;
+    return getFiles(path);
   }
 
   @override
   Future<List<FillerFile>> _fetchRoot() async {
-    return null;
+    return getFiles("");
+  }
+
+  Future<List<FillerFile>> getFiles(String path) async {
+    var filesRequest = http.Request(
+        "POST", Uri.parse("https://api.dropboxapi.com/2/files/list_folder"));
+    print(await storage.hasToken());
+    String token = await storage.getToken();
+    filesRequest.headers.putIfAbsent("Authorization", () => "Bearer " + token);
+    filesRequest.headers.putIfAbsent("Content-Type", () => "application/json");
+    filesRequest.body = "{\"path\": \"" + path + "\"}";
+    var filesResponse = await filesRequest.send();
+    var filesJson = await filesResponse.stream.bytesToString();
+    print(filesJson);
+    var decodedFilesJson = jsonDecode(filesJson);
+    Iterable list = decodedFilesJson["entries"];
+    final List<FillerFile> files = [];
+    list.forEach((decodedFile) {
+      var path = decodedFile["path_display"];
+      var date = decodedFile["client_modified"];
+      var name = decodedFile["name"];
+      var fileExtension = extension(name);
+      var isFolder = decodedFile[".tag"] == "folder";
+      files.add(DropboxFile(isFolder, path, name, date, fileExtension));
+    });
+    return Future.value(files);
   }
 
   @override
-  Future<List<FillerFile>> checkLoginAndCatchRoot(String data) async {
+  Future<void> getToken(String data) async {
     print("start flow");
     var requestTemp = http.Request(
         "POST", Uri.parse("https://api.dropboxapi.com/oauth2/token"));
@@ -247,26 +268,44 @@ class FilePickerDropbox extends FilePicker {
     String token = decodedJson["access_token"];
     print("end flow");
     print(token);
-    var filesRequest = http.Request(
-        "POST", Uri.parse("https://api.dropboxapi.com/2/files/list_folder"));
-    filesRequest.headers.putIfAbsent("Authorization", () => "Bearer " + token);
-    filesRequest.headers.putIfAbsent("Content-Type", () => "application/json");
-    filesRequest.body = "{\"path\": \"\"}";
-    var filesResponse = await filesRequest.send();
-    var filesJson = await filesResponse.stream.bytesToString();
-    print(filesJson);
-    var decodedFilesJson = jsonDecode(filesJson);
-    Iterable list = decodedFilesJson["entries"];
-    final List<FillerFile> files = [];
-    list.forEach((decodedFile){
-      var path = decodedFile["path_display"];
-      var date = decodedFile["client_modified"];
-      var name = decodedFile["name"];
-      var fileExtension = extension(name);
-      var isFolder = decodedFile[".tag"] == "folder";
-      files.add(DropboxFile(isFolder, path, name, date, fileExtension));
+    await storage.saveToken(token);
+    print(await storage.hasToken());
+  }
+
+  @override
+  Future<List<PDFPageImage>> renderPdfDocument(String path) async {
+    Directory directory;
+    if (Platform.isAndroid) {
+      bool isGranted = await _checkPermissions();
+      if (!isGranted) {
+        bloc..dispatch(MainEvent());
+        return null;
+      }
+    }
+    directory = await getApplicationDocumentsDirectory();
+    HttpClient client = HttpClient();
+    var request = await client
+        .getUrl(Uri.parse("https://content.dropboxapi.com/2/files/download"));
+    var token = await storage.getToken();
+    print(token);
+    request.headers.add("Authorization", "Bearer " + token);
+    request.headers.add("Dropbox-API-Arg", "{\"path\": \"" + path + "\"}");
+    var response = await request.close();
+    print(response.statusCode.toString());
+    File file = File(directory.path + "/" + basename(path));
+    file.create();
+    Completer completer = Completer();
+    final List<int> bytes = [];
+    response.listen((data) {
+      bytes.addAll(data);
+    }, onDone: () {
+      print(decodeUtf8(bytes));
+      completer.complete(file);
     });
-    return Future.value(files);
+    await completer.future;
+    await file.writeAsBytes(bytes);
+    print("File saved");
+    return super.renderPdfDocument(file.path);
   }
 }
 

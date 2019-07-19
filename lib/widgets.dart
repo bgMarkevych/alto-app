@@ -14,7 +14,7 @@ import 'states.dart';
 import 'package:native_pdf_renderer/native_pdf_renderer.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'constants.dart';
-import 'preferences.dart';
+import 'storage.dart';
 
 class SplashScreen extends StatelessWidget {
   @override
@@ -304,7 +304,7 @@ class FilesScreen extends StatelessWidget {
       builder: (context) => FilesBloc(
         getFilePickerByType(context, type),
         context,
-      )..dispatch(EcoSystemSelectedEvent("", type)),
+      )..dispatch(EcoSystemSelectedEvent(type)),
       child: Scaffold(
         body: FilesListContainer(type),
       ),
@@ -378,13 +378,17 @@ class FilesListContainer extends StatelessWidget {
 
 // ignore: must_be_immutable
 class FilesList extends StatelessWidget {
-  final List<FillerFile> files;
+  List<FillerFile> files;
   final EcoSystem type;
   final String folderName;
   bool isFilesEmpty;
 
-  FilesList(this.files, this.type, this.folderName) {
+  FilesList(List<FillerFile> files, this.type, this.folderName) {
     isFilesEmpty = files == null || files.isEmpty;
+    files.sort((a,b){
+      return a.isFolder == b.isFolder ? 0: 1;
+    });
+    this.files = files;
   }
 
   @override
@@ -480,6 +484,9 @@ class FileListItem extends StatelessWidget {
     print(file.name);
     return InkWell(
       onTap: () {
+        if(file.extension != ".pdf"){
+          return;
+        }
         bloc.dispatch(RenderPDFEvent(file.path));
       },
       child: Container(
@@ -1268,43 +1275,57 @@ void showLoadingDialog(context) {
       });
 }
 
+// ignore: must_be_immutable
 class WebLoginView extends StatelessWidget {
   WebViewController _controller;
   EcoSystem type;
+  String loginUrl;
+  String redirectUrl;
 
-  WebLoginView(this.type);
+  WebLoginView(this.type){
+    if(type == EcoSystem.DROPBOX){
+      loginUrl = DropboxConstants.LOGIN_URL;
+      redirectUrl = DropboxConstants.REDIRECT_URL;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leading: Icon(
-          Icons.arrow_back_ios,
-          color: Colors.white,
+        leading: InkWell(
+          onTap: (){
+            final bloc = BlocProvider.of<GlobalBloc>(context);
+            bloc.dispatch(MainEvent());
+          },
+          child: Icon(
+            Icons.arrow_back_ios,
+            color: Colors.white,
+          ),
         ),
         title: Text("Login"),
         centerTitle: true,
       ),
       body: WebView(
-        initialUrl: DropboxConstants.LOGIN_URL,
+        initialUrl: loginUrl,
         javascriptMode: JavascriptMode.unrestricted,
         onWebViewCreated: (c) {
           _controller = c;
         },
         onPageFinished: (string) {
-          if (string.contains(DropboxConstants.REDIRECT_URL)) {
-            handleCodeResult(string, type, context);
+          if (string.startsWith(redirectUrl)) {
+            handleCodeResult(string, context);
           }
         },
       ),
     );
   }
 
-  void handleCodeResult(String url, EcoSystem type, BuildContext context) {
+  void handleCodeResult(String url, BuildContext context) {
     var uri = Uri.parse(url);
     var code = uri.queryParameters["code"];
     print(code);
     final bloc = BlocProvider.of<FilesBloc>(context);
-    bloc.dispatch(EcoSystemSelectedEvent(code, type));
+    bloc.dispatch(LoginEvent(code));
   }
 }

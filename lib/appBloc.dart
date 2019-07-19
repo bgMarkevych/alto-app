@@ -11,7 +11,7 @@ import 'package:test_app/events.dart';
 import 'package:test_app/repository.dart';
 import 'package:test_app/states.dart';
 import 'widgets.dart';
-import 'preferences.dart';
+import 'storage.dart';
 
 class GlobalBloc extends Bloc<BasicEvent, BasicState> {
   @override
@@ -45,14 +45,23 @@ class FilesBloc extends Bloc<BasicEvent, BasicState> {
   @override
   Stream<BasicState> mapEventToState(BasicEvent event) async* {
     if (event is EcoSystemSelectedEvent) {
-      if ((event.data == null || event.data == "") && event.type != EcoSystem.STORAGE) {
+      bool hasToken = await filePicker.hasToken();
+      if (event.type != EcoSystem.STORAGE && !hasToken) {
         yield LoginState();
         return;
       }
       yield EcoSystemSelectedState();
       showLoadingDialog(context);
       List<FillerFile> files =
-          await filePicker.checkLoginAndCatchRoot(event.data);
+          await filePicker.routeToRoot();
+      Navigator.pop(context);
+      yield RootFolderState(files);
+    }
+    if(event is LoginEvent){
+      yield EcoSystemSelectedState();
+      showLoadingDialog(context);
+      await filePicker.getToken(event.code);
+      List<FillerFile> files = await filePicker.routeToRoot();
       Navigator.pop(context);
       yield RootFolderState(files);
     }
